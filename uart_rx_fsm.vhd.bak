@@ -1,0 +1,146 @@
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity uart_rx_fsm is
+  port(
+    i_resetBar  : in  std_logic;
+    i_clock     : in  std_logic;
+    i_rxd       : in  std_logic;
+    i_bclkx8    : in  std_logic;  -- high-rate sub-tick (pulse)
+    o_shift_rsr : out std_logic;  -- pulse to shift RSR
+    o_load_rdr  : out std_logic;  -- pulse to load RDR
+    o_rx_done   : out std_logic;
+    o_rx_error  : out std_logic;
+    o_RDRF      : out std_logic;
+    o_rxd_sync  : out std_logic
+  );
+end uart_rx_fsm;
+
+architecture rtl of uart_rx_fsm is
+  type state_type is (IDLE, START_WAIT, DATA_SAMPLE, STOP_SAMPLE);
+  signal state : state_type;
+  signal rxd_sync1, rxd_sync2 : std_logic;
+  signal subcount : integer range 0 to 7; -- counts BClkx8 pulses
+  signal bit_cnt  : integer range 0 to 7;
+  signal sample_pulse : std_logic;
+begin
+  -- Synchronize RxD into clock domain
+  process(i_clock, i_resetBar)
+  begin
+    if i_resetBar = '0' then
+      rxd_sync1 <= '1';
+      rxd_sync2 <= '1';
+    elsif rising_edge(i_clock) then
+      rxd_sync1 <= i_rxd;
+      rxd_sync2 <= rxd_sync1;
+    end if;
+  end process;
+
+  -- Use a registered version of i_bclkx8 to detect pulses synchronously
+  signal bclkx8_d : std_logic;
+  signal bclkx8_edge : std_logic;
+  process(i_clock, i_resetBar)
+  begin
+    if i_resetBar = '0' then
+      bclkx8_d <= '0';
+      bclkx8_edge <= '0';
+    elsif rising_edge(i_clock) then
+      bclkx8_edge <= '0';
+      if i_bclkx8 = '1' and bclkx8_d = '0' then
+        bclkx8_edge <= '1';
+      end if;
+      bclkx8_d <= i_bclkx8;
+    end if;
+  end process;
+
+  -- Main FSM
+  process(i_clock, i_resetBar)
+  begin
+    if i_resetBar = '0' then
+      state <= IDLE;
+      subcount <= 0;
+      bit_cnt <= 0;
+      o_shift_rsr <= '0';
+      o_load_rdr <= '0';
+      o_rx_done <= '0';
+      o_rx_error <= '0';
+      o_RDRF <= '0';
+    elsif rising_edge(i_clock) then
+      -- defaults
+      o_shift_rsr <= '0';
+      o_load_rdr <= '0';
+      o_rx_done <= '0';
+
+      case state is
+        when IDLE =>
+          o_RDRF <= '0';
+          o_rx_error <= '0';
+          subcount <= 0;
+          bit_cnt <= 0;
+          if rxd_sync2 = '0' then  -- start bit detected (falling)
+            state <= START_WAIT;
+            subcount <= 0;
+          end if;
+
+        when START_WAIT =>
+          -- wait 4 BClkx8 pulses to reach middle of start bit
+          if bclkx8_edge = '1' then
+            if subcount = 3 then
+              -- sample start bit; if still low, proceed to data sampling
+              if rxd_sync2 = '0' then
+                subcount <= 0;
+                bit_cnt <= 0;
+                state <= DATA_SAMPLE;
+              else
+                state <= IDLE; -- false start
+              end if;
+            else
+              subcount <= subcount + 1;
+            end if;
+          end if;
+
+        when DATA_SAMPLE =>
+          -- sample each data bit every 8 BClkx8 pulses
+          if bclkx8_edge = '1' then
+            if subcount = 7 then
+              -- sample now (middle of data bit)
+              o_shift_rsr <= '1';  -- shift in sampled bit via SIPO
+              subcount <= 0;
+              if bit_cnt = 7 then
+                bit_cnt <= 0;
+                state <= STOP_SAMPLE;
+              else
+                bit_cnt <= bit_cnt + 1;
+              end if;
+            else
+              subcount <= subcount + 1;
+            end if;
+          end if;
+
+        when STOP_SAMPLE =>
+          -- sample stop bit after 8 sub-ticks
+          if bclkx8_edge = '1' then
+            if subcount = 7 then
+              -- sample stop bit
+              if rxd_sync2 = '1' then
+                o_load_rdr <= '1';  -- transfer RSR -> RDR
+                o_rx_done <= '1';
+                o_RDRF <= '1';
+                o_rx_error <= '0';
+              else
+                o_rx_error <= '1';
+                o_RDRF <= '0';
+              end if;
+              subcount <= 0;
+              state <= IDLE;
+            else
+              subcount <= subcount + 1;
+            end if;
+          end if;
+      end case;
+    end if;
+  end process;
+
+  o_rxd_sync <= rxd_sync2;
+end rtl;

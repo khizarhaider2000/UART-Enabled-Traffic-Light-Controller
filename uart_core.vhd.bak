@@ -1,0 +1,69 @@
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity uart_core is
+  port(
+    i_resetBar : in  std_logic;
+    i_clock    : in  std_logic;
+    i_select   : in  std_logic;
+    i_addr     : in  std_logic_vector(1 downto 0);
+    i_rw       : in  std_logic; -- 1=read,0=write
+    i_data_in  : in  std_logic_vector(7 downto 0);
+    o_data_out : out std_logic_vector(7 downto 0);
+    i_rxd      : in  std_logic;
+    o_txd      : out std_logic;
+    o_irq      : out std_logic
+  );
+end uart_core;
+
+architecture structural of uart_core is
+  signal tdr_enable, sccr_enable : std_logic;
+  signal rdr_select, scsr_select, sccr_select : std_logic;
+  signal tdr_q, rdr_q, sccr_q, scsr_q : std_logic_vector(7 downto 0);
+  signal TDRE, RDRF, OE, FE : std_logic;
+  signal TIE, RIE : std_logic;
+  signal SEL : std_logic_vector(2 downto 0);
+  signal BClkx8, BClk : std_logic;
+  signal tsr_serial : std_logic;
+  signal rsr_parallel : std_logic_vector(7 downto 0);
+  signal rx_done, rx_error : std_logic;
+  signal tx_active, tx_done : std_logic;
+begin
+  ADDR_DEC: entity work.uart_address_decoder port map(i_addr => i_addr, i_rw => i_rw, i_uart_select => i_select, o_tdr_enable => tdr_enable, o_sccr_enable => sccr_enable, o_rdr_select => rdr_select, o_scsr_select => scsr_select, o_sccr_select => sccr_select);
+
+  SCCR_REG: entity work.sccr port map(i_resetBar => i_resetBar, i_clock => i_clock, i_enable => sccr_enable, i_d => i_data_in, o_q => sccr_q, o_TIE => TIE, o_RIE => RIE, o_SEL => SEL);
+  SCSR_REG: entity work.scsr port map(i_resetBar => i_resetBar, i_clock => i_clock, i_TDRE => TDRE, i_RDRF => RDRF, i_OE => OE, i_FE => FE, o_q => scsr_q);
+
+  TDR_REG: entity work.tdr port map(i_resetBar => i_resetBar, i_clock => i_clock, i_enable => tdr_enable, i_d => i_data_in, o_q => tdr_q);
+  RDR_REG: entity work.rdr port map(i_resetBar => i_resetBar, i_clock => i_clock, i_enable => '0', i_d => rsr_parallel, o_q => rdr_q); -- load via rx FSM
+
+  BRG: entity work.baud_rate_generator port map(i_resetBar => i_resetBar, i_clock => i_clock, i_sel => SEL, o_bclkx8 => BClkx8, o_bclk => BClk);
+
+  UART_TX: entity work.uart_tx port map(i_resetBar => i_resetBar, i_clock => i_clock, i_tx_start => '0', i_bclk => BClk, i_tx_data => tdr_q, o_txd => o_txd, o_tx_active => tx_active, o_tx_done => tx_done, o_TDRE => TDRE);
+
+  UART_RX: entity work.uart_rx port map(i_resetBar => i_resetBar, i_clock => i_clock, i_rxd => i_rxd, i_bclkx8 => BClkx8, o_rx_data => rsr_parallel, o_rx_done => rx_done, o_rx_error => rx_error, o_RDRF => RDRF);
+
+  -- IRQ logic
+  process(TIE, RIE, RDRF, OE, TDRE)
+  begin
+    if (RIE = '1' and (RDRF = '1' or OE = '1')) or (TIE = '1' and TDRE = '1') then
+      o_irq <= '1';
+    else
+      o_irq <= '0';
+    end if;
+  end process;
+
+  -- Read multiplexer
+  process(rdr_q, scsr_q, sccr_q, rdr_select, scsr_select, sccr_select)
+  begin
+    if rdr_select = '1' then
+      o_data_out <= rdr_q;
+    elsif scsr_select = '1' then
+      o_data_out <= scsr_q;
+    elsif sccr_select = '1' then
+      o_data_out <= sccr_q;
+    else
+      o_data_out <= (others => '0'); -- top-level expects driven bus; change to 'Z' if tri-state required
+    end if;
+  end process;
+end structural;

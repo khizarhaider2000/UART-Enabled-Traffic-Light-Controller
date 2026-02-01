@@ -1,0 +1,30 @@
+-- sccr.vhd
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity sccr is
+  port(
+    i_resetBar : in  std_logic;
+    i_clock    : in  std_logic;
+    i_enable   : in  std_logic;
+    i_d        : in  std_logic_vector(7 downto 0);
+    o_q        : out std_logic_vector(7 downto 0);
+    o_TIE      : out std_logic;
+    o_RIE      : out std_logic;
+    o_SEL      : out std_logic_vector(2 downto 0)
+  );
+end sccr;
+
+architecture rtl of sccr is
+  signal reg_out : std_logic_vector(7 downto 0);
+  component register8bit
+    port(i_resetBar : in std_logic; i_enable : in std_logic; i_d : in std_logic_vector(7 downto 0); i_clock : in std_logic; q_out : out std_logic_vector(7 downto 0));
+  end component;
+begin
+  SCCR_REG: register8bit port map(i_resetBar => i_resetBar, i_enable => i_enable, i_d => i_d, i_clock => i_clock, q_out => reg_out);
+  o_TIE <= reg_out(7);
+  o_RIE <= reg_out(6);
+  o_SEL <= reg_out(2 downto 0);
+  o_q   <= reg_out;
+end rtl;
+

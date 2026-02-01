@@ -1,0 +1,25 @@
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity uart_rx is
+  port(
+    i_resetBar  : in  std_logic;
+    i_clock     : in  std_logic;
+    i_rxd       : in  std_logic;
+    i_bclkx8    : in  std_logic;
+    o_rx_data   : out std_logic_vector(7 downto 0);
+    o_rx_done   : out std_logic;
+    o_rx_error  : out std_logic;
+    o_RDRF      : out std_logic
+  );
+end uart_rx;
+
+architecture structural of uart_rx is
+  signal shift_rsr, load_rdr : std_logic;
+  signal rsr_data : std_logic_vector(7 downto 0);
+begin
+  RSR_INST: entity work.rsr port map(i_resetBar => i_resetBar, i_clock => i_clock, i_shift_en => shift_rsr, i_serial => open, o_q => rsr_data);
+  -- Note: uart_rx_fsm provides synchronized serial bit to rsr; in this structural wrapper we assume rsr shifts from a serial input.
+  RX_FSM: entity work.uart_rx_fsm port map(i_resetBar => i_resetBar, i_clock => i_clock, i_rxd => i_rxd, i_bclkx8 => i_bclkx8, o_shift_rsr => shift_rsr, o_load_rdr => load_rdr, o_rx_done => o_rx_done, o_rx_error => o_rx_error, o_RDRF => o_RDRF, o_rxd_sync => open);
+  o_rx_data <= rsr_data;
+end structural;

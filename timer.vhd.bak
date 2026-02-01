@@ -1,0 +1,120 @@
+---------------------------------------------------------
+-- timer.vhd
+-- Wrapper for Lab 3 timer_collection
+-- Drives main/yellow/side/yellow timers based on state
+---------------------------------------------------------
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity timer is
+  port(
+    i_state            : in std_logic_vector(2 downto 0);  -- from traffic_fsm
+    i_mainStreet_timer : in std_logic_vector(3 downto 0);
+    i_sideStreet_timer : in std_logic_vector(3 downto 0);
+    i_resetBar         : in std_logic;
+    i_clk              : in std_logic;
+    o_done             : out std_logic;                    -- Signals FSM to advance
+    o_currentTimer     : out std_logic_vector(3 downto 0)  -- Display/debug
+  );
+end timer;
+
+architecture rtl of timer is
+
+  signal int_setCounter     : std_logic_vector(3 downto 0);
+  signal int_done_mux       : std_logic_vector(3 downto 0);
+
+  signal int_mainGreen      : std_logic_vector(3 downto 0);
+  signal int_mainYellow     : std_logic_vector(3 downto 0);
+  signal int_sideGreen      : std_logic_vector(3 downto 0);
+  signal int_sideYellow     : std_logic_vector(3 downto 0);
+
+  constant Y1 : std_logic_vector(3 downto 0) := "0111";   -- Hardcoded yellow
+  constant Y2 : std_logic_vector(3 downto 0) := "0111";
+
+begin
+
+  -- MAIN street GREEN
+  counter_main: entity work.loadable_counter
+    port map(
+      i_loadable   => i_mainStreet_timer,
+      i_setCounter => int_setCounter(0),
+      i_resetBar   => i_resetBar,
+      i_clk        => i_clk,
+      o_done       => int_done_mux(0),
+      o_q          => int_mainGreen
+    );
+
+  -- MAIN street YELLOW
+  counter_mainY: entity work.loadable_counter
+    port map(
+      i_loadable   => Y1,
+      i_setCounter => int_setCounter(1),
+      i_resetBar   => i_resetBar,
+      i_clk        => i_clk,
+      o_done       => int_done_mux(1),
+      o_q          => int_mainYellow
+    );
+
+  -- SIDE street GREEN
+  counter_side: entity work.loadable_counter
+    port map(
+      i_loadable   => i_sideStreet_timer,
+      i_setCounter => int_setCounter(2),
+      i_resetBar   => i_resetBar,
+      i_clk        => i_clk,
+      o_done       => int_done_mux(2),
+      o_q          => int_sideGreen
+    );
+
+  -- SIDE street YELLOW
+  counter_sideY: entity work.loadable_counter
+    port map(
+      i_loadable   => Y2,
+      i_setCounter => int_setCounter(3),
+      i_resetBar   => i_resetBar,
+      i_clk        => i_clk,
+      o_done       => int_done_mux(3),
+      o_q          => int_sideYellow
+    );
+
+  -------------------------------------------------------
+  -- DONE selector (4-to-1 mux)
+  -- Note: mapping order follows your decoder convention
+  -------------------------------------------------------
+  done_mux: entity work.mux41
+    port map(
+      i_A  => int_done_mux(0),
+      i_B  => int_done_mux(1),
+      i_C  => int_done_mux(3),
+      i_D  => int_done_mux(2),
+      i_s0 => i_state(0),
+      i_s1 => i_state(1),
+      o    => o_done
+    );
+
+  -------------------------------------------------------
+  -- CURRENT TIMER selector (bitwise 4× mux41)
+  -------------------------------------------------------
+  gen_timer_mux: for idx in 0 to 3 generate
+    mux_inst: entity work.mux41
+      port map(
+        i_A  => int_mainGreen(idx),
+        i_B  => int_mainYellow(idx),
+        i_C  => int_sideYellow(idx),
+        i_D  => int_sideGreen(idx),
+        i_s0 => i_state(0),
+        i_s1 => i_state(1),
+        o    => o_currentTimer(idx)
+      );
+  end generate;
+
+  -------------------------------------------------------
+  -- STATE DECODER
+  -------------------------------------------------------
+  decoder_inst: entity work.decoder_state_timer
+    port map(
+      i_state      => i_state,
+      o_setCounter => int_setCounter
+    );
+
+end rtl;

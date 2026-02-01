@@ -1,0 +1,40 @@
+---------------------------------------------------------
+-- traffic_fsm.vhd
+-- Wrapper for Lab 3 FSM (fsm_controller)
+-- Provides 2-bit state for UART + LED outputs
+---------------------------------------------------------
+library ieee;
+use ieee.std_logic_1164.all;
+
+entity traffic_fsm is
+  port (
+    i_resetBar  : in  std_logic;
+    i_clk       : in  std_logic;
+    i_sscs      : in  std_logic;                        -- Side-street sensor
+    i_timerDone : in  std_logic;                        -- From timer
+    o_state     : out std_logic_vector(1 downto 0);     -- UART needs 2-bit state
+    o_MST       : out std_logic_vector(2 downto 0);     -- Main Street lights
+    o_SST       : out std_logic_vector(2 downto 0)      -- Side Street lights
+  );
+end traffic_fsm;
+
+architecture rtl of traffic_fsm is
+  signal int_state : std_logic_vector(2 downto 0);      -- Full 3-bit Lab 3 state
+begin
+
+  -- Instantiate original FSM from Lab 3 (named association)
+  fsm_inst: entity work.fsm_controller
+    port map(
+      i_resetBar  => i_resetBar,
+      i_clk       => i_clk,
+      i_timerDone => i_timerDone,
+      i_sscs      => i_sscs,
+      o_MST       => o_MST,
+      o_SST       => o_SST,
+      o_state     => int_state
+    );
+
+  -- Project UART wants only 2 bits → use LSBs
+  o_state <= int_state(1 downto 0);
+
+end rtl;
